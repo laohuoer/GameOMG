@@ -1,0 +1,9 @@
+{
+  "gen1_starters": [1, 4, 7],
+  "gen1_total": 151,
+  "common_encounters": {
+    "town_grass": [16, 19, 21, 10, 13],
+    "route1_grass": [10, 13, 16, 19, 21],
+    "route1_rare": [25]
+  }
+}

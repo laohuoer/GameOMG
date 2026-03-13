@@ -1,0 +1,253 @@
+/* ===================================
+   全局重置 & 基础样式
+   =================================== */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --pokemon-red: #cc0000;
+  --pokemon-yellow: #ffcc00;
+  --pokemon-blue: #003399;
+  --pixel-font: 'Press Start 2P', monospace;
+  --canvas-w: 480px;
+  --canvas-h: 320px;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #1a1a2e;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ===================================
+   游戏容器
+   =================================== */
+#game-container {
+  position: relative;
+  width: var(--canvas-w);
+  height: var(--canvas-h);
+  background: #000;
+  box-shadow: 0 0 40px rgba(204, 0, 0, 0.4), 0 0 80px rgba(0, 0, 0, 0.8);
+  border: 2px solid #333;
+}
+
+/* 响应式缩放 */
+@media screen and (max-width: 500px), screen and (max-height: 360px) {
+  #game-container {
+    transform-origin: top left;
+    /* JS 动态设置 scale */
+  }
+}
+
+#game-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  cursor: default;
+}
+
+/* ===================================
+   加载遮罩
+   =================================== */
+.loading-overlay {
+  position: fixed;
+  inset: 0;
+  background: #1a1a2e;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  transition: opacity 0.5s ease;
+}
+
+.loading-overlay.fade-out {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.loading-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+}
+
+/* 精灵球动画 */
+.pokeball-loader {
+  width: 80px;
+  height: 80px;
+  position: relative;
+  animation: pokeball-spin 1s linear infinite;
+}
+
+.pokeball-top {
+  width: 80px;
+  height: 38px;
+  background: var(--pokemon-red);
+  border-radius: 40px 40px 0 0;
+  border: 3px solid #111;
+}
+
+.pokeball-middle {
+  width: 80px;
+  height: 8px;
+  background: #111;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pokeball-button {
+  width: 20px;
+  height: 20px;
+  background: #eee;
+  border-radius: 50%;
+  border: 3px solid #111;
+  margin-top: -6px;
+}
+
+.pokeball-bottom {
+  width: 80px;
+  height: 38px;
+  background: #eee;
+  border-radius: 0 0 40px 40px;
+  border: 3px solid #111;
+}
+
+@keyframes pokeball-spin {
+  0%   { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.loading-text {
+  font-family: var(--pixel-font);
+  font-size: 10px;
+  color: #fff;
+  text-align: center;
+  letter-spacing: 1px;
+}
+
+.loading-bar-container {
+  width: 200px;
+  height: 16px;
+  background: #333;
+  border: 2px solid #555;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.loading-bar {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--pokemon-red), var(--pokemon-yellow));
+  transition: width 0.3s ease;
+}
+
+/* ===================================
+   移动端虚拟控制器
+   =================================== */
+.mobile-controls {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 110px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  padding: 8px 12px;
+  pointer-events: none;
+}
+
+.mobile-controls.hidden {
+  display: none;
+}
+
+.dpad-container {
+  pointer-events: auto;
+}
+
+.joystick-base {
+  width: 80px;
+  height: 80px;
+  background: rgba(255, 255, 255, 0.15);
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.joystick-thumb {
+  width: 36px;
+  height: 36px;
+  background: rgba(255, 255, 255, 0.5);
+  border: 2px solid rgba(255, 255, 255, 0.7);
+  border-radius: 50%;
+  position: absolute;
+  transition: transform 0.05s ease;
+  pointer-events: none;
+}
+
+.action-buttons {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  pointer-events: auto;
+}
+
+.action-btn {
+  font-family: var(--pixel-font);
+  font-size: 8px;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  color: #fff;
+  font-weight: bold;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+  box-shadow: 0 4px 0 rgba(0,0,0,0.4);
+  transition: transform 0.08s, box-shadow 0.08s;
+}
+
+.action-btn:active {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 rgba(0,0,0,0.4);
+}
+
+.btn-b {
+  width: 44px;
+  height: 44px;
+  background: radial-gradient(circle at 40% 35%, #8888dd, #5555aa);
+  margin-bottom: 8px;
+}
+
+.btn-a {
+  width: 52px;
+  height: 52px;
+  background: radial-gradient(circle at 40% 35%, #ff5555, #cc1111);
+}
+
+.btn-start {
+  width: 48px;
+  height: 20px;
+  border-radius: 10px;
+  background: radial-gradient(circle at 40% 35%, #888, #444);
+  font-size: 6px;
+  margin-bottom: 20px;
+  margin-left: 4px;
+}
