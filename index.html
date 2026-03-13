@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>口袋妖怪 - 像素冒险</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="game-container">
+    <canvas id="game-canvas" width="480" height="320"></canvas>
+    <!-- 移动端虚拟控制器 -->
+    <div id="mobile-controls" class="mobile-controls hidden">
+      <div id="dpad-container" class="dpad-container">
+        <div id="joystick-base" class="joystick-base">
+          <div id="joystick-thumb" class="joystick-thumb"></div>
+        </div>
+      </div>
+      <div id="action-buttons" class="action-buttons">
+        <button id="btn-b" class="action-btn btn-b">B</button>
+        <button id="btn-a" class="action-btn btn-a">A</button>
+        <button id="btn-start" class="action-btn btn-start">START</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 加载进度遮罩 -->
+  <div id="loading-overlay" class="loading-overlay">
+    <div class="loading-content">
+      <div class="pokeball-loader">
+        <div class="pokeball-top"></div>
+        <div class="pokeball-middle">
+          <div class="pokeball-button"></div>
+        </div>
+        <div class="pokeball-bottom"></div>
+      </div>
+      <p id="loading-text" class="loading-text">正在加载...</p>
+      <div id="loading-bar-container" class="loading-bar-container">
+        <div id="loading-bar" class="loading-bar"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 脚本加载顺序很重要 -->
+  <!-- Engine -->
+  <script src="src/engine/GameLoop.js"></script>
+  <script src="src/engine/AssetLoader.js"></script>
+  <script src="src/engine/InputManager.js"></script>
+  <script src="src/engine/SceneManager.js"></script>
+  <script src="src/engine/SaveManager.js"></script>
+  <!-- Map -->
+  <script src="src/map/TileSet.js"></script>
+  <script src="src/map/TileMap.js"></script>
+  <script src="src/map/TriggerZone.js"></script>
+  <!-- Entities -->
+  <script src="src/entities/Pokemon.js"></script>
+  <script src="src/entities/Player.js"></script>
+  <!-- Battle -->
+  <script src="src/battle/TypeChart.js"></script>
+  <script src="src/battle/StatusEffect.js"></script>
+  <script src="src/battle/MoveCalculator.js"></script>
+  <script src="src/battle/CatchSystem.js"></script>
+  <script src="src/battle/BattleSystem.js"></script>
+  <!-- Pokemon -->
+  <script src="src/pokemon/PokeAPIClient.js"></script>
+  <script src="src/pokemon/PokemonFactory.js"></script>
+  <script src="src/pokemon/EvolutionSystem.js"></script>
+  <!-- UI -->
+  <script src="src/ui/DialogBox.js"></script>
+  <script src="src/ui/BattleUI.js"></script>
+  <script src="src/ui/MobileControls.js"></script>
+  <script src="src/ui/HUD.js"></script>
+  <!-- Scenes -->
+  <script src="src/scenes/TitleScene.js"></script>
+  <script src="src/scenes/WorldScene.js"></script>
+  <script src="src/scenes/BattleScene.js"></script>
+  <!-- Entry -->
+  <script src="src/main.js"></script>
+</body>
+</html>
