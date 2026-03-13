@@ -1,82 +1,59 @@
 /**
- * BattleSystem.js - 战斗核心逻辑状态机
+ * BattleSystem.js - 战斗核心逻辑状态机（修复版）
  *
- * 状态机：
- * ENTER → PLAYER_TURN → PLAYER_ACTION → ENEMY_TURN → RESOLVE_ACTIONS
- * → CHECK_STATUS → CHECK_FAINT → BATTLE_END / PLAYER_TURN (循环)
+ * 消息队列设计：
+ *   - 每条消息包含 { text, next } 其中 next 是显示完该条消息后自动执行的回调
+ *   - confirmMessage() 消费当前消息：执行 next，next 内部可以 _addMessage 或切换状态
+ *   - _addMessage 仅负责入队 + 若当前空闲则启动显示，不再有 _afterMessages
  */
 class BattleSystem {
   static STATES = {
     ENTER: 'enter',
-    PLAYER_TURN: 'player_turn',
-    PLAYER_MENU: 'player_menu',         // 主菜单（战斗/背包/宝可梦/逃跑）
-    SELECT_MOVE: 'select_move',          // 选择技能
-    SELECT_BALL: 'select_ball',          // 选择精灵球
-    SWITCH_POKEMON: 'switch_pokemon',    // 换宝可梦
-    ANIMATING: 'animating',             // 播放动画中
-    MESSAGE: 'message',                 // 显示消息，等待确认
-    CATCH_ANIMATION: 'catch_animation', // 捕捉动画
-    BATTLE_END: 'battle_end',           // 战斗结束
-    EVOLUTION: 'evolution',             // 进化中
+    PLAYER_MENU: 'player_menu',
+    SELECT_MOVE: 'select_move',
+    SELECT_BALL: 'select_ball',
+    SWITCH_POKEMON: 'switch_pokemon',
+    ANIMATING: 'animating',
+    MESSAGE: 'message',
+    CATCH_ANIMATION: 'catch_animation',
+    BATTLE_END: 'battle_end',
+    EVOLUTION: 'evolution',
   };
 
   constructor(moveCalculator, catchSystem) {
     this.moveCalc = moveCalculator;
     this.catchSystem = catchSystem;
 
-    // 当前状态
     this.state = BattleSystem.STATES.ENTER;
-    this.prevState = null;
-
-    // 战斗参与者
     this.playerPokemon = null;
     this.enemyPokemon = null;
     this.player = null;
 
-    // 消息队列
+    // 消息队列 [{text, next}]
     this.messageQueue = [];
     this.currentMessage = '';
+    this._currentNext = null; // 当前显示消息的 next 回调
 
-    // 动作队列
-    this.actionQueue = [];
-
-    // 选择状态
     this.selectedMenuIndex = 0;
     this.selectedMoveIndex = 0;
     this.selectedBallIndex = 0;
 
-    // 是否野生战斗
     this.isWild = true;
+    this.result = null;
 
-    // 战斗结果
-    this.result = null; // 'win' | 'lose' | 'run' | 'catch'
-
-    // 捕捉动画状态
     this.catchAnim = {
-      phase: 0,      // 0=飞出 1=摇晃 2=结果
-      shakeCount: 0,
-      maxShakes: 0,
-      success: false,
-      timer: 0,
-      ballX: 0,
-      ballY: 0,
-      targetX: 0,
-      targetY: 0,
+      phase: 0, shakeCount: 0, maxShakes: 0,
+      success: false, timer: 0,
     };
 
-    // 消息确认回调
-    this._msgCallback = null;
-
-    // 动画完成回调
-    this._animCallback = null;
-
-    // 战斗结果回调
     this.onBattleEnd = null;
+    this._evolutionData = null;
   }
 
-  /**
-   * 初始化战斗
-   */
+  // ===========================
+  // 初始化
+  // ===========================
+
   initBattle(playerPokemon, enemyPokemon, player, isWild = true) {
     this.playerPokemon = playerPokemon;
     this.enemyPokemon = enemyPokemon;
@@ -84,18 +61,20 @@ class BattleSystem {
     this.isWild = isWild;
     this.state = BattleSystem.STATES.ENTER;
     this.messageQueue = [];
+    this._currentNext = null;
+    this.currentMessage = '';
     this.result = null;
     this.selectedMenuIndex = 0;
     this.selectedMoveIndex = 0;
+    this._evolutionData = null;
 
-    // 重置战斗能力变化
     this._resetBattleStats(playerPokemon);
     this._resetBattleStats(enemyPokemon);
 
-    this._addMessage(`野生的 ${enemyPokemon.displayName} 出现了！`, () => {
-      this._addMessage(`去吧！${playerPokemon.displayName}！`, () => {
-        this.state = BattleSystem.STATES.PLAYER_MENU;
-      });
+    // 入场消息链
+    this._msg(`野生的 ${enemyPokemon.displayName} 出现了！`);
+    this._msg(`去吧！${playerPokemon.displayName}！`, () => {
+      this.state = BattleSystem.STATES.PLAYER_MENU;
     });
   }
 
@@ -108,42 +87,55 @@ class BattleSystem {
   }
 
   // ===========================
-  // 消息队列管理
+  // 消息队列（简化版）
   // ===========================
 
-  _addMessage(text, callback = null) {
-    this.messageQueue.push({ text, callback });
-    if (this.state !== BattleSystem.STATES.MESSAGE && this.state !== BattleSystem.STATES.ANIMATING) {
-      this._processNextMessage();
+  /**
+   * 添加一条消息到队列。
+   * @param {string} text
+   * @param {Function|null} next  该消息被玩家确认后执行的回调
+   */
+  _msg(text, next = null) {
+    this.messageQueue.push({ text, next });
+    // 如果当前不在显示消息，立即显示第一条
+    if (this.state !== BattleSystem.STATES.MESSAGE) {
+      this._showNextMessage();
     }
   }
 
-  _processNextMessage() {
-    if (this.messageQueue.length === 0) {
-      if (this._msgCallback) {
-        const cb = this._msgCallback;
-        this._msgCallback = null;
-        cb();
-      }
-      return;
-    }
-    const msg = this.messageQueue.shift();
-    this.currentMessage = msg.text;
-    this._msgCallback = msg.callback;
+  _showNextMessage() {
+    if (this.messageQueue.length === 0) return;
+    const item = this.messageQueue.shift();
+    this.currentMessage = item.text;
+    this._currentNext = item.next;
     this.state = BattleSystem.STATES.MESSAGE;
   }
 
   /**
-   * 确认当前消息（玩家按A）
+   * 玩家按 A/Z 确认当前消息
    */
   confirmMessage() {
     if (this.state !== BattleSystem.STATES.MESSAGE) return;
-    const cb = this._msgCallback;
-    this._msgCallback = null;
+
+    const next = this._currentNext;
+    this._currentNext = null;
+    this.currentMessage = '';
+
+    // 先从队列中拉取下一条消息（如果有）
     if (this.messageQueue.length > 0) {
-      this._processNextMessage();
-    } else if (cb) {
-      cb();
+      this._showNextMessage();
+    } else {
+      // 队列空时，先切换到 IDLE 状态，再执行 next
+      // 这样 next 内部的 _msg() 会因 state != MESSAGE 而自动调用 _showNextMessage
+      this.state = BattleSystem.STATES.PLAYER_MENU; // 临时状态，next 会覆盖
+    }
+
+    // 执行 next 回调（可能入队新消息，或切换状态）
+    if (next) next();
+
+    // 如果 next 入队了新消息，但当前不在 MESSAGE 状态，手动启动显示
+    if (this.messageQueue.length > 0 && this.state !== BattleSystem.STATES.MESSAGE) {
+      this._showNextMessage();
     }
   }
 
@@ -153,10 +145,10 @@ class BattleSystem {
 
   navigateMenu(dir) {
     if (this.state === BattleSystem.STATES.PLAYER_MENU) {
-      const max = 4; // 战斗/背包/宝可梦/逃跑
+      const max = 4;
       this.selectedMenuIndex = (this.selectedMenuIndex + dir + max) % max;
     } else if (this.state === BattleSystem.STATES.SELECT_MOVE) {
-      const max = this.playerPokemon.moves.length;
+      const max = Math.max(1, this.playerPokemon.moves.length);
       this.selectedMoveIndex = (this.selectedMoveIndex + dir + max) % max;
     }
   }
@@ -195,12 +187,15 @@ class BattleSystem {
       case 1: // 背包
         if (this.isWild) {
           this.state = BattleSystem.STATES.SELECT_BALL;
+          this.selectedBallIndex = 0;
         } else {
-          this._addMessage('对方训练家！不能使用道具！');
+          this._msg('对方训练家！不能使用道具！', () => {
+            this.state = BattleSystem.STATES.PLAYER_MENU;
+          });
         }
         break;
       case 2: // 宝可梦
-        this._addMessage('（换宝可梦功能预留）', () => {
+        this._msg('（换宝可梦功能预留）', () => {
           this.state = BattleSystem.STATES.PLAYER_MENU;
         });
         break;
@@ -217,18 +212,15 @@ class BattleSystem {
   _executePlayerMove(moveIndex) {
     const move = this.playerPokemon.moves[moveIndex];
     if (!move || move.pp <= 0) {
-      this._addMessage('没有 PP 了！', () => { this.state = BattleSystem.STATES.PLAYER_MENU; });
+      this._msg('没有 PP 了！', () => { this.state = BattleSystem.STATES.PLAYER_MENU; });
       return;
     }
 
-    // 扣 PP
     this.playerPokemon.useMove(moveIndex);
 
-    // 先手判断（速度比较）
     const playerFirst = this.playerPokemon.getEffectiveStat('speed') >= this.enemyPokemon.getEffectiveStat('speed')
       || (move.priority || 0) > 0;
 
-    // 选择敌方技能
     const enemyMove = this._selectEnemyMove();
 
     if (playerFirst) {
@@ -254,23 +246,25 @@ class BattleSystem {
     }
   }
 
+  /**
+   * 执行一次攻击，所有消息显示完后调用 callback
+   */
   _execMove(attacker, defender, move, callback) {
-    this._addMessage(`${attacker.displayName} 使用了 ${move.displayName || move.name}！`, () => {
-      // 先检查能否行动
-      const canActResult = attacker.checkCanAct();
-      if (canActResult.message) {
-        this._addMessage(canActResult.message);
-      }
+    // 先检查能否行动（状态异常）
+    const canActResult = attacker.checkCanAct();
 
-      if (!canActResult.canAct) {
-        if (callback) callback();
-        return;
-      }
+    if (!canActResult.canAct) {
+      const statusMsg = canActResult.message || `${attacker.displayName} 无法行动！`;
+      this._msg(statusMsg, callback);
+      return;
+    }
 
+    // 使用技能
+    this._msg(`${attacker.displayName} 使用了 ${move.displayName || move.name}！`, () => {
       // 命中检查
       const hit = this.moveCalc.checkAccuracy(attacker, defender, move);
       if (!hit) {
-        this._addMessage(`${attacker.displayName} 的攻击没有命中！`, callback);
+        this._msg(`${attacker.displayName} 的攻击没有命中！`, callback);
         return;
       }
 
@@ -278,7 +272,7 @@ class BattleSystem {
       const result = this.moveCalc.calcDamage(attacker, defender, move);
 
       if (result.effectiveness === 0) {
-        this._addMessage(`对 ${defender.displayName} 没有效果...`, callback);
+        this._msg(`对 ${defender.displayName} 没有效果...`, callback);
         return;
       }
 
@@ -287,46 +281,26 @@ class BattleSystem {
         defender.takeDamage(result.damage);
       }
 
-      // 效果文字
+      // 收集所有附加消息
+      const extraMsgs = [];
+      if (result.isCrit) extraMsgs.push('暴击！');
       const effectText = this.moveCalc.typeChart.getEffectivenessText(result.effectiveness);
-      if (result.isCrit) {
-        this._addMessage('暴击！');
-      }
-      if (effectText) {
-        this._addMessage(effectText);
-      }
+      if (effectText) extraMsgs.push(effectText);
 
-      // 技能副效果
       const effectMsgs = this.moveCalc.applyMoveEffect(attacker, defender, move);
-      effectMsgs.forEach(m => this._addMessage(m));
+      extraMsgs.push(...effectMsgs);
 
-      if (callback) {
-        if (this.messageQueue.length === 0) {
-          callback();
-        } else {
-          // 等消息队列清空后再回调
-          this._afterMessages(callback);
+      if (extraMsgs.length === 0) {
+        // 无附加消息，直接执行回调
+        if (callback) callback();
+      } else {
+        // 将附加消息依次入队，最后一条带 callback
+        for (let i = 0; i < extraMsgs.length; i++) {
+          const isLast = i === extraMsgs.length - 1;
+          this._msg(extraMsgs[i], isLast ? callback : null);
         }
       }
     });
-  }
-
-  _afterMessages(callback) {
-    const check = () => {
-      if (this.messageQueue.length === 0 && this.state !== BattleSystem.STATES.MESSAGE) {
-        callback();
-      } else {
-        this._msgCallback = () => {
-          if (this.messageQueue.length > 0) {
-            this._processNextMessage();
-            this._afterMessages(callback);
-          } else {
-            callback();
-          }
-        };
-      }
-    };
-    check();
   }
 
   _selectEnemyMove() {
@@ -338,40 +312,48 @@ class BattleSystem {
   }
 
   _endOfTurn() {
-    // 异常状态伤害结算
+    const msgs = [];
+
     const playerStatusDmg = this.playerPokemon.processStatusDamage();
     if (playerStatusDmg > 0) {
       const sName = StatusEffect.STATUS_NAMES[this.playerPokemon.status] || '';
-      this._addMessage(`${this.playerPokemon.displayName} 因${sName}受到了 ${playerStatusDmg} 点伤害！`);
+      msgs.push({ text: `${this.playerPokemon.displayName} 因${sName}受到了 ${playerStatusDmg} 点伤害！` });
     }
 
     const enemyStatusDmg = this.enemyPokemon.processStatusDamage();
     if (enemyStatusDmg > 0) {
       const sName = StatusEffect.STATUS_NAMES[this.enemyPokemon.status] || '';
-      this._addMessage(`${this.enemyPokemon.displayName} 因${sName}受到了 ${enemyStatusDmg} 点伤害！`);
+      msgs.push({ text: `${this.enemyPokemon.displayName} 因${sName}受到了 ${enemyStatusDmg} 点伤害！` });
     }
 
-    // 检查昏厥
-    if (this.playerPokemon.isFainted) {
-      this._handlePlayerFaint();
-    } else if (this.enemyPokemon.isFainted) {
-      this._handleEnemyFaint();
-    } else {
-      this._afterMessages(() => {
+    const doCheck = () => {
+      if (this.playerPokemon.isFainted) {
+        this._handlePlayerFaint();
+      } else if (this.enemyPokemon.isFainted) {
+        this._handleEnemyFaint();
+      } else {
         this.state = BattleSystem.STATES.PLAYER_MENU;
         this.selectedMenuIndex = 0;
-      });
+      }
+    };
+
+    if (msgs.length === 0) {
+      doCheck();
+    } else {
+      for (let i = 0; i < msgs.length; i++) {
+        const isLast = i === msgs.length - 1;
+        this._msg(msgs[i].text, isLast ? doCheck : null);
+      }
     }
   }
 
   _handleEnemyFaint() {
-    this._addMessage(`${this.enemyPokemon.displayName} 昏倒了！`, () => {
-      // 经验分配
+    this._msg(`${this.enemyPokemon.displayName} 昏倒了！`, () => {
       const expGain = this._calcExpGain(this.enemyPokemon);
       const leveled = this.playerPokemon.gainExp(expGain);
-      this._addMessage(`${this.playerPokemon.displayName} 获得了 ${expGain} 经验！`, () => {
+      this._msg(`${this.playerPokemon.displayName} 获得了 ${expGain} 经验！`, () => {
         if (leveled > 0) {
-          this._addMessage(`${this.playerPokemon.displayName} 升到了 ${this.playerPokemon.level} 级！`, () => {
+          this._msg(`${this.playerPokemon.displayName} 升到了 ${this.playerPokemon.level} 级！`, () => {
             this._checkEvolution();
           });
         } else {
@@ -382,14 +364,13 @@ class BattleSystem {
   }
 
   _handlePlayerFaint() {
-    this._addMessage(`${this.playerPokemon.displayName} 昏倒了！`, () => {
+    this._msg(`${this.playerPokemon.displayName} 昏倒了！`, () => {
       const hasAlive = this.player.team.some(p => !p.isFainted && p !== this.playerPokemon);
       if (!hasAlive) {
-        this._addMessage('所有宝可梦都昏倒了...', () => {
+        this._msg('所有宝可梦都昏倒了...', () => {
           this._endBattle('lose');
         });
       } else {
-        // TODO: 换宝可梦
         this._endBattle('lose');
       }
     });
@@ -405,7 +386,7 @@ class BattleSystem {
       const evo = new EvolutionSystem();
       const nextId = evo.checkLevelEvolution(this.playerPokemon);
       if (nextId) {
-        this._addMessage(`${this.playerPokemon.displayName} 要进化了！`, () => {
+        this._msg(`${this.playerPokemon.displayName} 要进化了！`, () => {
           this.state = BattleSystem.STATES.EVOLUTION;
           this._evolutionData = { pokemon: this.playerPokemon, nextId };
         });
@@ -417,17 +398,16 @@ class BattleSystem {
 
   _tryRun() {
     if (!this.isWild) {
-      this._addMessage('无法逃跑！', () => { this.state = BattleSystem.STATES.PLAYER_MENU; });
+      this._msg('无法逃跑！', () => { this.state = BattleSystem.STATES.PLAYER_MENU; });
       return;
     }
     const playerSpeed = this.playerPokemon.getEffectiveStat('speed');
     const enemySpeed = this.enemyPokemon.getEffectiveStat('speed');
     const runChance = playerSpeed >= enemySpeed ? 1 : (playerSpeed * 128 / enemySpeed + 30) / 256;
     if (Math.random() < runChance) {
-      this._addMessage('成功逃跑了！', () => { this._endBattle('run'); });
+      this._msg('成功逃跑了！', () => { this._endBattle('run'); });
     } else {
-      this._addMessage('没能逃掉！', () => {
-        // 敌方攻击
+      this._msg('没能逃掉！', () => {
         const enemyMove = this._selectEnemyMove();
         this._execMove(this.enemyPokemon, this.playerPokemon, enemyMove, () => {
           this._endOfTurn();
@@ -441,22 +421,20 @@ class BattleSystem {
   // ===========================
 
   _executeCatch(ballIndex) {
-    const ballTypes = Object.keys(this.player.bag.pokeballs || {})
-      .filter(k => (this.player.bag.pokeballs[k] || 0) > 0);
+    const pokeballs = this.player.bag.pokeballs || {};
+    const ballTypes = Object.keys(pokeballs).filter(k => (pokeballs[k] || 0) > 0);
 
     if (ballTypes.length === 0) {
-      this._addMessage('背包里没有精灵球！', () => { this.state = BattleSystem.STATES.PLAYER_MENU; });
+      this._msg('背包里没有精灵球！', () => { this.state = BattleSystem.STATES.PLAYER_MENU; });
       return;
     }
 
-    const ballType = ballTypes[ballIndex % ballTypes.length] || 'poke_ball';
+    const ballType = ballTypes[Math.min(ballIndex, ballTypes.length - 1)] || 'poke_ball';
     this.player.useItem('pokeballs', ballType);
 
     const ballName = CatchSystem.getBallName(ballType);
-    this._addMessage(`扔出了${ballName}！`, () => {
+    this._msg(`扔出了${ballName}！`, () => {
       const result = this.catchSystem.attempt(this.enemyPokemon, ballType);
-
-      // 开始捕捉动画状态
       this.state = BattleSystem.STATES.CATCH_ANIMATION;
       this.catchAnim.phase = 0;
       this.catchAnim.shakeCount = 0;
@@ -466,21 +444,18 @@ class BattleSystem {
     });
   }
 
-  /**
-   * 捕捉动画更新（每帧调用）
-   */
   updateCatchAnimation(dt) {
     if (this.state !== BattleSystem.STATES.CATCH_ANIMATION) return;
     this.catchAnim.timer += dt;
 
     switch (this.catchAnim.phase) {
-      case 0: // 等待精灵球飞出动画（由 BattleUI 处理）
+      case 0:
         if (this.catchAnim.timer > 1.5) {
           this.catchAnim.phase = 1;
           this.catchAnim.timer = 0;
         }
         break;
-      case 1: // 摇晃阶段
+      case 1:
         if (this.catchAnim.timer > 0.8) {
           this.catchAnim.timer = 0;
           this.catchAnim.shakeCount++;
@@ -489,36 +464,35 @@ class BattleSystem {
           }
         }
         break;
-      case 2: // 结果阶段
+      case 2:
         if (this.catchAnim.timer > 1.0) {
+          this.catchAnim.phase = 3;
           if (this.catchAnim.success) {
-            this._addMessage(`${this.enemyPokemon.displayName} 被捕获了！`, () => {
+            this._msg(`${this.enemyPokemon.displayName} 被捕获了！`, () => {
               this._onCatchSuccess();
             });
           } else {
-            this._addMessage(`${this.enemyPokemon.displayName} 破球而出了！`, () => {
+            this._msg(`${this.enemyPokemon.displayName} 破球而出了！`, () => {
               const enemyMove = this._selectEnemyMove();
               this._execMove(this.enemyPokemon, this.playerPokemon, enemyMove, () => {
                 this._endOfTurn();
               });
             });
           }
-          this.catchAnim.phase = 3;
         }
         break;
     }
   }
 
   _onCatchSuccess() {
-    // 加入队伍或仓库
     if (this.player.team.length < 6) {
       this.enemyPokemon.isWild = false;
       this.player.addPokemonToTeam(this.enemyPokemon);
-      this._addMessage(`${this.enemyPokemon.displayName} 加入了队伍！`, () => {
+      this._msg(`${this.enemyPokemon.displayName} 加入了队伍！`, () => {
         this._endBattle('catch');
       });
     } else {
-      this._addMessage(`${this.enemyPokemon.displayName} 被送到了宝可梦仓库！`, () => {
+      this._msg(`${this.enemyPokemon.displayName} 被送到了宝可梦仓库！`, () => {
         this._endBattle('catch');
       });
     }
@@ -535,7 +509,7 @@ class BattleSystem {
   }
 
   // ===========================
-  // Update（每帧调用）
+  // 每帧更新
   // ===========================
 
   update(dt) {

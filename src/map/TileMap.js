@@ -59,13 +59,15 @@ class TileMap {
     }
 
     this._groundCacheDirty = true;
-    this._buildGroundCache();
+    // 注意：_buildGroundCache() 需要 tileSet 已赋值，由外部在设置 tileSet 后主动调用
   }
 
   /**
    * 将地面层预渲染到离屏 Canvas
+   * 调用前必须确保 this.tileSet 已赋值
    */
   _buildGroundCache() {
+    if (!this.tileSet) return; // 防止 tileSet 未就绪时崩溃
     const pw = this.width * this.tileWidth;
     const ph = this.height * this.tileHeight;
     this._groundCache = document.createElement('canvas');
@@ -80,6 +82,7 @@ class TileMap {
   _renderLayerToCtx(ctx, layerName) {
     const layer = this.layers[layerName];
     if (!layer || !layer.data) return;
+    if (!this.tileSet) return; // tileSet 未就绪时跳过
     for (let row = 0; row < this.height; row++) {
       for (let col = 0; col < this.width; col++) {
         const tileId = layer.data[row * this.width + col];

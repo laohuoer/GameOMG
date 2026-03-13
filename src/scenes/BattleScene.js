@@ -60,20 +60,19 @@ class BattleScene {
     this.battleUI._playerHPAnim = playerPokemon.hpPercent;
     this.battleUI._enemyHPAnim = enemyPokemon.hpPercent;
 
-    // 处理进化
+    // 处理进化：覆盖 BattleSystem 的 _checkEvolution
     const bs = this.battleSystem;
-    const origCheck = bs._checkEvolution.bind(bs);
     bs._checkEvolution = () => {
       const evo = new EvolutionSystem();
       const nextId = evo.checkLevelEvolution(bs.playerPokemon);
       if (nextId && this._evolutionFactory) {
-        bs._addMessage(`${bs.playerPokemon.displayName} 要进化了！`, async () => {
+        bs._msg(`${bs.playerPokemon.displayName} 要进化了！`, async () => {
           bs.state = BattleSystem.STATES.EVOLUTION;
           bs._evolutionData = { pokemon: bs.playerPokemon, nextId };
 
           await this._doEvolution(bs.playerPokemon, nextId);
 
-          bs._addMessage(`${bs.playerPokemon.displayName} 进化完成！`, () => {
+          bs._msg(`${bs.playerPokemon.displayName} 进化完成！`, () => {
             bs._endBattle('win');
           });
         });

@@ -10,6 +10,7 @@ class BattleUI {
 
     // 对话框
     this.dialogBox = new DialogBox(canvas);
+    this._lastDisplayedMessage = ''; // 跟踪上一条消息，避免每帧 reset
 
     // 动画状态
     this._spriteShakeTimer = 0;
@@ -98,9 +99,13 @@ class BattleUI {
     // UI 菜单区域（底部）
     this._drawBattleMenu(ctx, battleSystem);
 
-    // 对话框
+    // 对话框：只在消息内容变化时调用 show()，防止每帧重置打字机动画
     if (state === BS.MESSAGE || state === BS.ENTER) {
-      this.dialogBox.show(battleSystem.currentMessage);
+      const msg = battleSystem.currentMessage || '';
+      if (msg !== this._lastDisplayedMessage) {
+        this._lastDisplayedMessage = msg;
+        this.dialogBox.show(msg);
+      }
       this.dialogBox.render(ctx);
     }
 
