@@ -92,8 +92,10 @@ class WorldScene {
     if (saveData.team && saveData.team.length > 0) {
       this.player.team = saveData.team.map(d => Pokemon.fromJSON(d));
     } else {
-      // 新游戏给一只默认宝可梦（皮卡丘）
-      this._giveStarterPokemon();
+      // 新游戏：先立即给一只离线默认皮卡丘保证可玩性，再异步从API更新
+      const defaultPika = this.factory.createDefault(25, 5, false);
+      this.player.addPokemonToTeam(defaultPika);
+      this._giveStarterPokemon(); // 异步，不阻塞流程
     }
 
     this.hud.playTime = saveData.player?.playTime || 0;
@@ -102,10 +104,12 @@ class WorldScene {
   async _giveStarterPokemon() {
     try {
       const pikachu = await this.factory.createFromAPI(25, 5, false);
-      this.player.addPokemonToTeam(pikachu);
+      if (this.player) {
+        // 替换第一只（默认离线版）
+        this.player.team[0] = pikachu;
+      }
     } catch (e) {
-      const pikachu = this.factory.createDefault(25, 5, false);
-      this.player.addPokemonToTeam(pikachu);
+      // 已有离线默认版本，不需要处理
     }
   }
 
@@ -126,17 +130,23 @@ class WorldScene {
   _initTileSet() {
     // 程序绘制 Tileset（使用 Canvas 生成彩色瓦片）
     if (!this.tileSet) {
-      const tileImage = this._generateTilesetImage();
-      this.tileSet = new TileSet(tileImage, 16, 16);
+      // 直接使用离屏 Canvas 作为图像源，无需等待 onload
+      const tileCanvas = this._generateTilesetCanvas();
+      // TileSet 可以直接接受 Canvas 元素（drawImage 支持 HTMLCanvasElement）
+      this.tileSet = new TileSet(tileCanvas, 16, 16);
+      this.tileMap.tileSet = this.tileSet;
+      this.tileMap._buildGroundCache();
+    } else {
+      // tileSet 已存在，地图切换时只需重建缓存
       this.tileMap.tileSet = this.tileSet;
       this.tileMap._buildGroundCache();
     }
   }
 
   /**
-   * 程序生成 Tileset 图像（16种类型的彩色瓦片）
+   * 程序生成 Tileset Canvas（直接返回 CanvasElement，不转 Image，无异步问题）
    */
-  _generateTilesetImage() {
+  _generateTilesetCanvas() {
     const tileW = 16, tileH = 16;
     const cols = 16, rows = 4;
     const canvas = document.createElement('canvas');
@@ -145,32 +155,32 @@ class WorldScene {
     const ctx = canvas.getContext('2d');
 
     const tileColors = [
-      null,           // 0: 空
-      '#7ac748',      // 1: 草地（淡绿）
-      '#5a9e30',      // 2: 深草地
-      '#e8d870',      // 3: 沙地
-      '#8888ee',      // 4: 水
-      '#666699',      // 5: 深水
-      '#c87828',      // 6: 泥土路
-      '#b87020',      // 7: 深路
-      '#aaaaaa',      // 8: 石板路
-      '#888888',      // 9: 深石板
-      '#d0b080',      // 10: 建筑地基
-      '#e0c090',      // 11: 建筑浅色
-      '#cc6644',      // 12: 建筑深色
-      '#228822',      // 13: 树木（深绿）
-      '#114411',      // 14: 树木（暗绿）
-      '#ffffff',      // 15: 白色/雪
-      '#ffaa00',      // 16: 精灵球图案（路点）
-      '#ff4444',      // 17: 建筑屋顶
-      '#884488',      // 18: 草丛（遭遇区）
-      '#44aa44',      // 19: 草丛浅
-      '#2288ff',      // 20: 水（浅）
-      '#1166cc',      // 21: 水（深）
-      '#eecc88',      // 22: 沙路
-      '#ccaa66',      // 23: 沙路深
-      '#ffff88',      // 24: 花朵
-      '#ee88ee',      // 25: 花朵（粉）
+      null,        // 0: 空
+      '#7ac748',   // 1: 草地（淡绿）
+      '#5a9e30',   // 2: 深草地
+      '#e8d870',   // 3: 沙地
+      '#8888ee',   // 4: 水
+      '#666699',   // 5: 深水
+      '#c87828',   // 6: 泥土路
+      '#b87020',   // 7: 深路
+      '#aaaaaa',   // 8: 石板路
+      '#888888',   // 9: 深石板
+      '#d0b080',   // 10: 建筑地基
+      '#e0c090',   // 11: 建筑浅色
+      '#cc6644',   // 12: 建筑深色
+      '#228822',   // 13: 树木（深绿）
+      '#114411',   // 14: 树木（暗绿）
+      '#ffffff',   // 15: 白色/雪
+      '#ffaa00',   // 16: 精灵球图案（路点）
+      '#ff4444',   // 17: 建筑屋顶
+      '#884488',   // 18: 草丛（遭遇区）
+      '#44aa44',   // 19: 草丛浅
+      '#2288ff',   // 20: 水（浅）
+      '#1166cc',   // 21: 水（深）
+      '#eecc88',   // 22: 沙路
+      '#ccaa66',   // 23: 沙路深
+      '#ffff88',   // 24: 花朵
+      '#ee88ee',   // 25: 花朵（粉）
     ];
 
     for (let i = 1; i < tileColors.length; i++) {
@@ -183,16 +193,10 @@ class WorldScene {
       ctx.fillStyle = tileColors[i];
       ctx.fillRect(x, y, tileW, tileH);
 
-      // 添加简单纹理
       this._addTileTexture(ctx, i, x, y, tileW, tileH, tileColors[i]);
     }
 
-    const img = new Image();
-    img.src = canvas.toDataURL();
-    // 同步设置 image 属性（ canvas.toDataURL 是同步的）
-    img.width = canvas.width;
-    img.height = canvas.height;
-    return img;
+    return canvas;
   }
 
   _addTileTexture(ctx, id, x, y, w, h, baseColor) {

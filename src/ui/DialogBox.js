@@ -106,13 +106,11 @@ class DialogBox {
       ctx.fillText(lines[i], this.boxX + this.padding, this.boxY + this.padding + i * lineHeight);
     }
 
-    // 翻页箭头
+    // 翻页箭头（手动绘制三角形，ctx 无 fillTriangle API）
     if (this.isComplete && this.arrowVisible) {
       ctx.fillStyle = '#333';
       const arrowX = this.boxX + this.boxW - 14;
       const arrowY = this.boxY + this.boxH - 12;
-      ctx.fillTriangle(arrowX, arrowY, arrowX + 6, arrowY, arrowX + 3, arrowY + 5);
-      // fillTriangle 不是标准 API，手动实现
       ctx.beginPath();
       ctx.moveTo(arrowX, arrowY);
       ctx.lineTo(arrowX + 6, arrowY);
